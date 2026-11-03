@@ -30,10 +30,29 @@ GREEN='\033[1;32m' # Light Green.
 
 WHIPTAIL_TITLE="Project NOMAD Installation"
 NOMAD_DIR="/opt/project-nomad"
-MANAGEMENT_COMPOSE_FILE_URL="https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/management_compose.yaml"
-START_SCRIPT_URL="https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/start_nomad.sh"
-STOP_SCRIPT_URL="https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/stop_nomad.sh"
-UPDATE_SCRIPT_URL="https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/update_nomad.sh"
+# Default source of the compose file + helper scripts. By default these point at the
+# upstream Crosstalk-Solutions/project-nomad `main` branch — byte-identical to the
+# historically hardcoded URLs, so an unmodified install behaves exactly as before.
+# A fork that ships its own helper scripts (distro-gate, NVIDIA, download fixes, …)
+# can redirect the installer at itself with these two env vars, set together:
+#   NOMAD_SOURCE_REPO=<owner>/<repo>     e.g. BuboTheWise/nomad-unchained
+#   NOMAD_SOURCE_REF=<branch or tag>     e.g. main
+# If either is left unset it falls back to the upstream default for that part, so a
+# single partial override is always well-defined. The mapping is GitHub ref syntax
+# (refs/heads/<ref>), which keeps a future upstream branch rename from silently 404-ing
+# only some of the downloads: all four artifact URLs are derived from ONE base below.
+resolve_source_urls() {
+  local src_repo="${NOMAD_SOURCE_REPO:-Crosstalk-Solutions/project-nomad}"
+  local src_ref="${NOMAD_SOURCE_REF:-main}"
+
+  # One base, four derived URLs — single source of truth. No per-URL owner literals.
+  local base="https://raw.githubusercontent.com/${src_repo}/refs/heads/${src_ref}/install"
+  MANAGEMENT_COMPOSE_FILE_URL="${base}/management_compose.yaml"
+  START_SCRIPT_URL="${base}/start_nomad.sh"
+  STOP_SCRIPT_URL="${base}/stop_nomad.sh"
+  UPDATE_SCRIPT_URL="${base}/update_nomad.sh"
+}
+resolve_source_urls
 script_option_debug='true'
 accepted_terms='false'
 local_ip_address=''
