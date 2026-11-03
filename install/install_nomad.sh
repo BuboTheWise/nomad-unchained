@@ -111,14 +111,144 @@ check_is_bash() {
     echo -e "${GREEN}#${RESET} This script is running in bash.\\n"
 }
 
-check_is_debian_based() {
-  if [[ ! -f /etc/debian_version ]]; then
-    header_red
-    echo -e "${RED}#${RESET} This script is designed to run on Debian-based systems only.\\n"
-    echo -e "${RED}#${RESET} Please run this script on a Debian-based system and try again."
-    exit 1
+# ---------------------------------------------------------------------------
+# Multi-distro package dispatch (Debian / RHEL / Arch).
+# Detect the family ONCE and route every install through pkg_install() so the
+# rest of the script never hardcodes `apt-get`. Logical deps are mapped to the
+# family's package names where they differ (e.g. gpg -> gnupg on Arch).
+# Upstream: project-nomad issue #1, PR #243 ("add multi-distro Linux support"),
+# and issue #1381 (hostname -I unavailable on Arch).
+PKG_FAMILY=''
+
+detect_pkg_family() {
+  local os_ids=''
+  if [[ -r /etc/os-release ]]; then
+    os_ids="$(sed -nE 's/^(ID|ID_LIKE)=//p' /etc/os-release 2>/dev/null | sed 's/"//g' | tr '\n' ' ')"
   fi
-    echo -e "${GREEN}#${RESET} This script is running on a Debian-based system.\\n"
+
+  # A manager on PATH is the authoritative signal — it is the call we can
+  # actually make. Fall back to os-release lineage only when no manager is
+  # found, so a minimal image is reported accurately.
+  if command -v apt-get &> /dev/null; then
+    PKG_FAMILY='debian'
+  elif command -v dnf &> /dev/null; then
+    PKG_FAMILY='rhel'
+  elif command -v pacman &> /dev/null; then
+    PKG_FAMILY='arch'
+  else
+    if printf '%s' "${os_ids}" | grep -qiE 'debian|ubuntu'; then
+      PKG_FAMILY='debian'
+    elif printf '%s' "${os_ids}" | grep -qiE 'fedora|rhel|centos'; then
+      PKG_FAMILY='rhel'
+    elif printf '%s' "${os_ids}" | grep -qiE 'arch|manjaro|endeavour'; then
+      PKG_FAMILY='arch'
+    fi
+  fi
+}
+
+# Map a logical dependency name to the detected family's package name.
+# Only names that actually drift across distros are special-cased — on Arch the
+# `gpg` binary ships in the `gnupg` package. Everything else is pass-through.
+pkg_map_name() {
+  local logical="$1"
+  if [[ "${PKG_FAMILY}" == 'arch' && "${logical}" == 'gpg' ]]; then
+    printf '%s\n' 'gnupg'
+  else
+    printf '%s\n' "${logical}"
+  fi
+}
+
+# pkg_install <logical-dep...> — install packages with the detected family's
+# manager, remapping logical dep names where a distro names the package
+# differently (e.g. gpg -> gnupg on Arch).
+pkg_install() {
+  local -a pkgs=()
+  local logical
+  for logical in "$@"; do
+    pkgs+=("$(pkg_map_name "${logical}")")
+  done
+
+  case "${PKG_FAMILY}" in
+    debian)
+      sudo apt-get update
+      sudo apt-get install -y "${pkgs[@]}"
+      ;;
+    rhel)
+      sudo dnf install -y "${pkgs[@]}"
+      ;;
+    arch)
+      sudo pacman -S --noconfirm --needed "${pkgs[@]}"
+      ;;
+    *)
+      echo -e "${RED}#${RESET} No supported package manager found (expected apt, dnf, or pacman). Please install: ${*}\\n"
+      return 1
+      ;;
+  esac
+}
+
+# Resolve the first usable IPv4: non-loopback and off the Docker / link-local
+# subnets. Tries hostname -I, then `ip -4 -o addr show`, then ifconfig, then a
+# python3 socket fallback. Prints the address, or nothing. Upstream: issue #2.
+resolve_local_ip() {
+  local -a ips=()
+  local -a tmp=()
+
+  if command -v hostname &> /dev/null; then
+    mapfile -t tmp < <(hostname -I 2>/dev/null)
+    ips+=("${tmp[@]}")
+    tmp=()
+  fi
+
+  if command -v ip &> /dev/null; then
+    mapfile -t tmp < <(ip -4 -o addr show 2>/dev/null | awk '$3=="inet"{print $4}' | cut -d/ -f1)
+    ips+=("${tmp[@]}")
+    tmp=()
+  fi
+
+  if command -v ifconfig &> /dev/null; then
+    mapfile -t tmp < <(ifconfig 2>/dev/null | awk '$1 ~ /^inet/{print $2}' | sed 's/^addr://')
+    ips+=("${tmp[@]}")
+    tmp=()
+  fi
+
+  local ip
+  for ip in "${ips[@]}"; do
+    [[ -z "${ip}" ]] && continue
+    case "${ip}" in
+      127.0.0.*|169.254.*|172.17.*) continue ;;
+    esac
+    if [[ "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+      printf '%s\n' "${ip}"
+      return 0
+    fi
+  done
+
+  if command -v python3 &> /dev/null; then
+    local py_ip=''
+    py_ip="$(python3 -c 'import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80)); print(s.getsockname()[0]); s.close()' 2>/dev/null)"
+    if [[ -n "${py_ip}" ]]; then
+      case "${py_ip}" in
+        127.0.0.*|169.254.*|172.17.*) : ;;
+        *) printf '%s\n' "${py_ip}"; return 0 ;;
+      esac
+    fi
+  fi
+
+  return 0  # no candidate resolved; caller decides fail vs warn
+}
+
+check_supported_distro() {
+  detect_pkg_family
+  if [[ -n "${PKG_FAMILY}" ]]; then
+    echo -e "${GREEN}#${RESET} Detected supported package family: ${PKG_FAMILY}.\\n"
+  else
+    local os_id=''
+    if [[ -r /etc/os-release ]]; then
+      os_id="$(sed -nE 's/^ID=//p' /etc/os-release 2>/dev/null | sed 's/"//g')"
+    fi
+    echo -e "${YELLOW}#${RESET} WARNING: could not map this system (ID '${os_id:-unknown}') to a supported package family (debian/rhel/arch).\\n"
+    echo -e "${YELLOW}#${RESET} Continuing — Docker installs via get.docker.com, but a missing package manager may block the dependency step.\\n"
+  fi
 }
 
 check_is_x86_64() {
@@ -156,8 +286,7 @@ ensure_dependencies_installed() {
 
   if [[ ${#missing_deps[@]} -gt 0 ]]; then
     echo -e "${YELLOW}#${RESET} Installing required dependencies: ${missing_deps[*]}...\\n"
-    sudo apt-get update
-    sudo apt-get install -y "${missing_deps[@]}"
+    pkg_install "${missing_deps[@]}"
 
     # Verify installation
     for dep in "${missing_deps[@]}"; do
@@ -195,11 +324,8 @@ ensure_docker_installed() {
   if ! command -v docker &> /dev/null; then
     echo -e "${YELLOW}#${RESET} Docker not found. Installing Docker...\\n"
     
-    # Update package database
-    sudo apt-get update
-    
-    # Install prerequisites
-    sudo apt-get install -y ca-certificates curl
+    # Prerequisites, routed through the detected package family.
+    pkg_install ca-certificates curl
     
     # Create directory for keyrings
     # sudo install -m 0755 -d /etc/apt/keyrings
@@ -514,11 +640,12 @@ start_management_containers() {
 }
 
 get_local_ip() {
-  local_ip_address=$(hostname -I | awk '{print $1}')
+  local_ip_address="$(resolve_local_ip)"
   if [[ -z "$local_ip_address" ]]; then
     echo -e "${RED}#${RESET} Unable to determine local IP address. Please check your network configuration."
     exit 1
   fi
+  echo -e "${GREEN}#${RESET} Local IP resolved to: ${local_ip_address}\\n"
 }
 verify_gpu_setup() {
   # This function only displays GPU setup status and is completely non-blocking
@@ -650,7 +777,7 @@ success_message() {
 ###################################################################################################################################################################################################
 
 # Pre-flight checks
-check_is_debian_based
+check_supported_distro
 check_is_x86_64
 check_is_bash
 check_has_sudo

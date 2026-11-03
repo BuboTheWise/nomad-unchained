@@ -55,14 +55,97 @@ check_is_bash() {
     echo -e "${GREEN}#${RESET} This script is running in bash.\\n"
 }
 
-check_is_debian_based() {
-  if [[ ! -f /etc/debian_version ]]; then
-    header_red
-    echo -e "${RED}#${RESET} This script is designed to run on Debian-based systems only.\\n"
-    echo -e "${RED}#${RESET} Please run this script on a Debian-based system and try again."
-    exit 1
+# ---------------------------------------------------------------------------
+# Multi-distro package dispatch (Debian / RHEL / Arch). Mirrors install_nomad.sh
+# so an install on Arch/RHEL is not undone by an update on the same host.
+# Upstream: project-nomad issue #1, PR #243, and issue #1381.
+PKG_FAMILY=''
+
+detect_pkg_family() {
+  local os_ids=''
+  if [[ -r /etc/os-release ]]; then
+    os_ids="$(sed -nE 's/^(ID|ID_LIKE)=//p' /etc/os-release 2>/dev/null | sed 's/"//g' | tr '\n' ' ')"
   fi
-    echo -e "${GREEN}#${RESET} This script is running on a Debian-based system.\\n"
+  if command -v apt-get &> /dev/null; then
+    PKG_FAMILY='debian'
+  elif command -v dnf &> /dev/null; then
+    PKG_FAMILY='rhel'
+  elif command -v pacman &> /dev/null; then
+    PKG_FAMILY='arch'
+  else
+    if printf '%s' "${os_ids}" | grep -qiE 'debian|ubuntu'; then
+      PKG_FAMILY='debian'
+    elif printf '%s' "${os_ids}" | grep -qiE 'fedora|rhel|centos'; then
+      PKG_FAMILY='rhel'
+    elif printf '%s' "${os_ids}" | grep -qiE 'arch|manjaro|endeavour'; then
+      PKG_FAMILY='arch'
+    fi
+  fi
+}
+
+# Resolve the first usable IPv4: non-loopback and off the Docker / link-local
+# subnets. Tries hostname -I, then `ip -4 -o addr show`, then ifconfig, then a
+# python3 socket fallback. Upstream: issue #2 (hostname -I unavailable on Arch).
+resolve_local_ip() {
+  local -a ips=()
+  local -a tmp=()
+
+  if command -v hostname &> /dev/null; then
+    mapfile -t tmp < <(hostname -I 2>/dev/null)
+    ips+=("${tmp[@]}")
+    tmp=()
+  fi
+
+  if command -v ip &> /dev/null; then
+    mapfile -t tmp < <(ip -4 -o addr show 2>/dev/null | awk '$3=="inet"{print $4}' | cut -d/ -f1)
+    ips+=("${tmp[@]}")
+    tmp=()
+  fi
+
+  if command -v ifconfig &> /dev/null; then
+    mapfile -t tmp < <(ifconfig 2>/dev/null | awk '$1 ~ /^inet/{print $2}' | sed 's/^addr://')
+    ips+=("${tmp[@]}")
+    tmp=()
+  fi
+
+  local ip
+  for ip in "${ips[@]}"; do
+    [[ -z "${ip}" ]] && continue
+    case "${ip}" in
+      127.0.0.*|169.254.*|172.17.*) continue ;;
+    esac
+    if [[ "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+      printf '%s\n' "${ip}"
+      return 0
+    fi
+  done
+
+  if command -v python3 &> /dev/null; then
+    local py_ip=''
+    py_ip="$(python3 -c 'import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80)); print(s.getsockname()[0]); s.close()' 2>/dev/null)"
+    if [[ -n "${py_ip}" ]]; then
+      case "${py_ip}" in
+        127.0.0.*|169.254.*|172.17.*) : ;;
+        *) printf '%s\n' "${py_ip}"; return 0 ;;
+      esac
+    fi
+  fi
+
+  return 0
+}
+
+check_supported_distro() {
+  detect_pkg_family
+  if [[ -n "${PKG_FAMILY}" ]]; then
+    echo -e "${GREEN}#${RESET} Detected supported package family: ${PKG_FAMILY}.\\n"
+  else
+    local os_id=''
+    if [[ -r /etc/os-release ]]; then
+      os_id="$(sed -nE 's/^ID=//p' /etc/os-release 2>/dev/null | sed 's/"//g')"
+    fi
+    echo -e "${YELLOW}#${RESET} WARNING: could not map this system (ID '${os_id:-unknown}') to a supported package family (debian/rhel/arch).\\n"
+    echo -e "${YELLOW}#${RESET} Continuing — the update step only drives Docker, which is distro-agnostic.\\n"
+  fi
 }
 
 get_update_confirmation(){
@@ -131,10 +214,12 @@ force_recreate() {
 }
 
 get_local_ip() {
-  local_ip_address=$(hostname -I | awk '{print $1}')
+  local_ip_address="$(resolve_local_ip)"
   if [[ -z "$local_ip_address" ]]; then
     echo -e "${RED}#${RESET} Unable to determine local IP address. Please check your network configuration."
     # Don't exit if we can't determine the local IP address, it's not critical for the installation
+  else
+    echo -e "${GREEN}#${RESET} Local IP resolved to: ${local_ip_address}\\n"
   fi
 }
 
@@ -153,7 +238,7 @@ success_message() {
 ###################################################################################################################################################################################################
 
 # Pre-flight checks
-check_is_debian_based
+check_supported_distro
 check_is_bash
 check_has_sudo
 
