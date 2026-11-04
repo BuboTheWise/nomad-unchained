@@ -655,17 +655,100 @@ download_management_compose_file() {
   fi
   echo -e "${GREEN}#${RESET} Docker compose file downloaded successfully to $compose_file_path.\\n"
 
-  local app_key=$(generateRandomPass)
-  local db_root_password=$(generateRandomPass)
-  local db_user_password=$(generateRandomPass)
+  local app_key db_root_password db_user_password
+  app_key=$(generateRandomPass)
+  db_root_password=$(generateRandomPass)
+  db_user_password=$(generateRandomPass)
 
-  # If MySQL data directory exists from a previous install attempt, remove it.
-  # MySQL only initializes credentials on first startup when the data dir is empty.
-  # If stale data exists, MySQL ignores the new passwords above and uses the old ones,
-  # causing "Access denied" errors when the admin container tries to connect.
-  if [[ -d "${NOMAD_DIR}/mysql" ]]; then
-    echo -e "${YELLOW}#${RESET} Removing existing MySQL data directory to ensure credentials match...\\n"
+  # MySQL data-directory guard (issue #5):
+  #
+  #   MySQL only honours MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD / MYSQL_DATABASE
+  #   on the FIRST start, and only when the data directory is EMPTY. Against a
+  #   populated data dir it keeps the credentials it was originally initialized
+  #   with and ignores any new ones. Two consequences drive this guard:
+  #
+  #     * The historical behaviour was `rm -rf ${NOMAD_DIR}/mysql` on every
+  #       install, which reliably avoided "Access denied" but destroyed a
+  #       healthy user's whole database on every reinstall / upgrade — the bug
+  #       this fix addresses.
+  #     * Simply stopping the wipe is NOT enough: the installer regenerates
+  #       random credentials below each run, so a preserved data dir would keep
+  #       the OLD creds while the admin container is handed NEW ones → the same
+  #       "Access denied" reappears. A preserve MUST therefore also reuse the
+  #       credentials the data dir was actually initialized with.
+  #
+  #   This installer records those credentials in ${NOMAD_DIR}/.nomad-mysql-init
+  #   on the first successful install. On a re-run the decision is:
+  #
+  #     NOMAD_RESET_DB=1  Explicit: always rm the data dir and re-init fresh
+  #                       (restores the original rm -rf for when you want a
+  #                       hard reset).
+  #     NOMAD_KEEP_DB=1   Explicit: never touch the data dir. If a credential
+  #                       record exists we reuse it, otherwise we inject fresh
+  #                       random creds and MySQL may keep the old ones.
+  #     (default)         - Healthy dir + credential record  -> PRESERVE and
+  #                                                                 reuse those creds.
+  #                       - Data dir present, no record (stale/orphan/interrupted
+  #                          attempt)                        -> RM and re-init
+  #                                                                 fresh (the original intent).
+  #                       - No data dir at all               -> FRESH init with the new creds.
+  #
+  #   "Healthy" is detected by the presence of a real schema directory
+  #   (${NOMAD_DIR}/mysql/mysql) or the InnoDB system tablespace (ibdata1).
+  local mysql_populated=0
+  if [[ -d "${NOMAD_DIR}/mysql/mysql" || -f "${NOMAD_DIR}/mysql/ibdata1" ]]; then
+    mysql_populated=1
+  fi
+
+  local reuse_existing=0
+  local creds_file="${NOMAD_DIR}/.nomad-mysql-init"
+
+  if [[ "${NOMAD_KEEP_DB:-0}" == "1" ]]; then
+    echo -e "${YELLOW}#${RESET} NOMAD_KEEP_DB=1 — preserving any existing MySQL data directory.\\n"
+    if [[ -f "${creds_file}" ]]; then
+      reuse_existing=1
+    fi
+  elif [[ -n "${NOMAD_RESET_DB:-}" ]]; then
+    if [[ -d "${NOMAD_DIR}/mysql" ]]; then
+      echo -e "${YELLOW}#${RESET} NOMAD_RESET_DB set — removing existing MySQL data directory for a fresh init...\\n"
+      sudo rm -rf "${NOMAD_DIR}/mysql"
+    fi
+  elif [[ "${mysql_populated}" -eq 1 && -f "${creds_file}" ]]; then
+    reuse_existing=1
+    echo -e "${GREEN}#${RESET} Existing MySQL data directory with a matching credential record — preserving it (data survives reinstall / upgrade). Reusing the stored credentials.\\n"
+  elif [[ -d "${NOMAD_DIR}/mysql" ]]; then
+    # Data dir present but no credential record → stale/orphaned from an
+    # interrupted attempt. We don't know its creds, so re-init fresh (the
+    # original intent of the guard) rather than ship a broken "Access denied".
+    echo -e "${YELLOW}#${RESET} Found a MySQL data directory without a credential record — removing it for a clean fresh init...\\n"
     sudo rm -rf "${NOMAD_DIR}/mysql"
+  else
+    echo -e "${YELLOW}#${RESET} No existing MySQL data directory — will initialize fresh with the new credentials.\\n"
+  fi
+
+  # Keep the injected credentials consistent with the (possibly preserved)
+  # data dir: either reload what the dir was initialized with, or record the
+  # new ones so the NEXT install can preserve correctly.
+  #
+  # ${NOMAD_DIR} is user-owned (see create_nomad_directory), so write the
+  # credential file as the invoking user directly — if we used `sudo tee` it
+  # would end up root-owned and unreadable by the user on the next run when
+  # the guard sources it.
+  if [[ "${reuse_existing}" -eq 1 ]]; then
+    # Credential values are [A-Za-z0-9] only (generateRandomPass), safe to source.
+    # The file lives at a runtime-computed path, so tell shellcheck not to follow it.
+    # shellcheck source=/dev/null
+    . "${creds_file}"
+    app_key="${NOMAD_MYSQL_APP_KEY}"
+    db_root_password="${NOMAD_MYSQL_ROOT_PW}"
+    db_user_password="${NOMAD_MYSQL_USER_PW}"
+  else
+    {
+      printf 'NOMAD_MYSQL_APP_KEY=%s\n' "${app_key}"
+      printf 'NOMAD_MYSQL_ROOT_PW=%s\n' "${db_root_password}"
+      printf 'NOMAD_MYSQL_USER_PW=%s\n' "${db_user_password}"
+    } > "${creds_file}" || true
+    chmod 600 "${creds_file}" 2>/dev/null || true
   fi
 
   # Inject dynamic env values into the compose file
