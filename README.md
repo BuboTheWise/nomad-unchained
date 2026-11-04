@@ -34,6 +34,27 @@ Project NOMAD is now installed on your device! Open a browser and navigate to `h
 
 For a complete step-by-step walkthrough (including Ubuntu installation), see the [Installation Guide](https://www.projectnomad.us/install). For Windows users, see the [WSL2 install guide](https://www.projectnomad.us/install/wsl2) — community-supported path covering native Docker and Docker Desktop install routes.
 
+### Reinstalling or upgrading over an existing install
+
+If you reinstall the installer on top of a working NOMAD instance, your MySQL
+data directory (and the database credentials it was initialized with) are
+**preserved** — the installer remembers the credentials from the first run in
+`/opt/project-nomad/.nomad-mysql-init` so your existing data survives without
+an extra backup step.
+
+Two environment variables override the default behaviour if you want it:
+
+| env var | effect |
+|---|---|
+| `NOMAD_KEEP_DB=1` | force-preserve the existing data directory (never touches it; reuses recorded credentials if present) |
+| `NOMAD_RESET_DB=1` | force-delete the existing data directory and re-initialize fresh (same as the pre-`#5` `rm -rf` behaviour) |
+
+Example:
+
+```bash
+NOMAD_RESET_DB=1 sudo bash install_nomad.sh   # hard reset: wipes the local DB
+```
+
 ### Advanced Installation
 For more control over the installation process, copy and paste the [Docker Compose template](https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/management_compose.yaml) into a `docker-compose.yml` file and customize it to your liking (be sure to replace any placeholders with your actual values). Then, run `docker compose up -d` to start the Command Center and its dependencies. Note: this method is recommended for advanced users only, as it requires familiarity with Docker and manual configuration before starting.
 
