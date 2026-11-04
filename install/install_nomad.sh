@@ -388,6 +388,91 @@ check_docker_compose() {
   fi
 }
 
+# Install the NVIDIA container toolkit with the detected family's package
+# manager. Each family pulls the package from NVIDIA's official source for
+# that distro:
+#   debian  - NVIDIA deb repository (GPG keyring + apt source entry)
+#   rhel    - NVIDIA rpm repository (official nvidia-container-toolkit.repo)
+#   arch    - official extra repositories
+#
+# This function is non-blocking: on any failure it prints a warning and
+# returns 0 so the rest of the installation can continue (GPU support is a
+# nicety, not a hard requirement).
+install_nvidia_toolkit_for_family() {
+  local family="${1:-}"
+
+  case "${family}" in
+    debian)
+      echo -e "${YELLOW}#${RESET} (debian) Adding NVIDIA container toolkit apt repository...\\n"
+
+      # Import the NVIDIA GPG key into the trustable keyring.
+      local keyring_path="/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
+      if ! curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null \
+          | sudo gpg --batch --yes --dearmor -o "${keyring_path}" 2>/dev/null; then
+        echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit GPG key.\\n"
+        echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
+        return 0
+      fi
+
+      # Register the stable deb repository against that keyring.
+      if ! curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null \
+          | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+          | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null 2>&1; then
+        echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit apt repository.\\n"
+        echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
+        return 0
+      fi
+
+      if ! sudo apt-get update 2>/dev/null; then
+        echo -e "${YELLOW}#${RESET} Warning: Failed to refresh the apt package list.\\n"
+      fi
+
+      if ! sudo apt-get install -y nvidia-container-toolkit 2>/dev/null; then
+        echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit.\\n"
+        echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
+        return 0
+      fi
+      ;;
+
+    rhel)
+      echo -e "${YELLOW}#${RESET} (rhel/fedora) Adding NVIDIA container rpm repository...\\n"
+
+      local repo_file="/etc/yum.repos.d/nvidia-container-toolkit.repo"
+      if [[ ! -f "${repo_file}" ]]; then
+        if ! curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo 2>/dev/null \
+            | sudo tee "${repo_file}" > /dev/null 2>&1; then
+          echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit rpm repository.\\n"
+          echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
+          return 0
+        fi
+      fi
+
+      # gpgcheck is disabled in the official NVIDIA .repo file (gpgkey points
+      # at NVIDIA's key), so a separate key import is not required here.
+      if ! sudo dnf install -y nvidia-container-toolkit 2>/dev/null; then
+        echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit.\\n"
+        echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
+        return 0
+      fi
+      ;;
+
+    arch)
+      echo -e "${YELLOW}#${RESET} (arch) Installing NVIDIA container toolkit from official repositories...\\n"
+
+      if ! sudo pacman -S --noconfirm --needed nvidia-container-toolkit 2>/dev/null; then
+        echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit.\\n"
+        echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
+        return 0
+      fi
+      ;;
+
+    *)
+      echo -e "${YELLOW}#${RESET} Warning: No supported package manager for family '${family:-unknown}'.\\n"
+      echo -e "${YELLOW}#${RESET} NVIDIA container toolkit must be installed manually for GPU support.\\n"
+      ;;
+  esac
+}
+
 setup_nvidia_container_toolkit() {
   # This function attempts to set up NVIDIA GPU support but is non-blocking
   # Any failures will result in warnings but will NOT stop the installation process
@@ -424,28 +509,20 @@ setup_nvidia_container_toolkit() {
   
   echo -e "${YELLOW}#${RESET} Installing NVIDIA container toolkit...\\n"
   
-  # Install dependencies per https://docs.ollama.com/docker - wrapped in error handling
-  if ! curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null; then
-    echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit GPG key. Continuing anyway...\\n"
-    return 0
-  fi
-  
-  if ! curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null \
-      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-      | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null 2>&1; then
-    echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit repository. Continuing anyway...\\n"
-    return 0
-  fi
-  
-  if ! sudo apt-get update 2>/dev/null; then
-    echo -e "${YELLOW}#${RESET} Warning: Failed to update package list. Continuing anyway...\\n"
-    return 0
-  fi
-  
-  if ! sudo apt-get install -y nvidia-container-toolkit 2>/dev/null; then
-    echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit. Continuing anyway...\\n"
-    return 0
-  fi
+  # Install the toolkit using the detected package family. Each family uses
+  # NVIDIA's official distribution channel:
+  #   debian  -> deb repository (keyring + apt source)
+  #   rhel    -> rpm repository (official nvidia-container-toolkit.repo via dnf)
+  #   arch    -> extra repositories (pacman)
+  #
+  # All failure paths are non-blocking: a warning is emitted and the install
+  # continues, so hosts without an NVIDIA GPU (or with a partial toolkit)
+  # still complete their installation.
+  #
+  # ensure_dependencies_installed already ran before this function, so curl
+  # (for the repository metadata) and gpg (for the debian keyring) are in
+  # place; dnf and pacman are provided by the base images of their families.
+  install_nvidia_toolkit_for_family "${PKG_FAMILY}"
   
   echo -e "${GREEN}#${RESET} NVIDIA container toolkit installed successfully.\\n"
   
