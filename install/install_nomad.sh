@@ -321,12 +321,19 @@ generateRandomPass() {
 }
 
 # install_docker_native — install Docker from the distro's own package repo.
-# Only invoked for distro IDs that get.docker.com (SCRIPT_COMMIT ada7a567,
-# 2026-11-03) rejects at install time: Arch / CachyOS / Manjaro / EndeavourOS
-# (its "arch" family isn't in the supported list) and AlmaLinux 9 / Oracle
-# Linux (their `ID_LIKE` is not in get.docker.com's centos|fedora|rhel|rocky
-# accept-list, so the convenience script exits 1 with "Unsupported
-# distribution" before installing anything).
+# Routed here for two groups (issue #7 AC-1):
+#   1. Distro IDs get.docker.com (SCRIPT_COMMIT ada7a567, 2026-11-03) rejects
+#      at install time: Arch / CachyOS / Manjaro / EndeavourOS (its "arch"
+#      family isn't in the supported list) and AlmaLinux ("almalinux") / Oracle
+#      Linux ("ol") (neither is in the centos|fedora|rhel|rocky accept-list);
+#      the convenience script exits 1 with "Unsupported distribution" before
+#      installing anything.
+#   2. The RHEL-family IDs the card names for the native path — `rhel` and
+#      `rocky` — which, although *accept-listed*, are routed to the Docker CE
+#      RPM repo so every `dnf`-based host installs identically; this matches
+#      the per-family house style already used by setup_nvidia_container_toolkit.
+# Only the fedora IDs stay on the get.docker.com convenience path to keep the
+# change thin and rebaseable against upstream (see AC-4).
 #
 # Upstream references (issue #7 "Upstream path"):
 #   - Crosstalk-Solutions/project-nomad PR #243 — "Docker installs from
@@ -348,8 +355,8 @@ generateRandomPass() {
 #           containerd.io docker-buildx-plugin docker-compose-plugin`,
 #           followed by `systemctl enable --now docker`. The same Docker CE
 #           repo that Debian/Ubuntu uses is the documented source for
-#           AlmaLinux 9 and Oracle Linux (both ship `dnf config-manager`
-#           natively).
+#           AlmaLinux 9, Oracle Linux, RHEL and Rocky (all ship `dnf
+#           config-manager`).
 #
 # On a failure this function returns non-zero — the caller (
 # ensure_docker_installed) is responsible for printing the failure line and
@@ -437,16 +444,19 @@ ensure_docker_installed() {
         # centos|fedora|rhel|rocky. AlmaLinux's ID is "almalinux" and Oracle
         # Linux's is "ol"; the script keys off the primary ID, so both hit
         # "Unsupported distribution" and exit 1 before installing anything
-        # (issue #7). Route those two through the native Docker CE RPM repo;
-        # everything else in the rhel family (fedora, rocky, centos) continues
-        # to use get.docker.com exactly as before.
+        # (issue #7).
+        #
+        # Per issue #7 AC-1, `almalinux/ol/rhel/rocky` are all routed to
+        # dnf (native Docker CE RPM repo). Only the fedora IDs stay on the
+        # get.docker.com path (that family is in the script's accept-list)
+        # to keep the change thin and rebaseable against upstream.
         case "${osid}" in
-          almalinux|ol|oracle)
+          almalinux|ol|oracle|rhel|rocky)
             native_tried="yes"
             install_docker_native rhel || { echo -e "${RED}#${RESET} Docker installation failed. Please check the logs and try again."; exit 1; }
             ;;
           *)
-            :; # fall through to get.docker.com
+            :; # fedora and other: fall through to get.docker.com
             ;;
         esac
         ;;
@@ -456,12 +466,11 @@ ensure_docker_installed() {
     esac
   fi
 
-  # On any host where the native path was not taken (debian, fedora, rocky,
-  # centos, unknown family) or where `command -v docker` already reports a
-  # working binary (including a podman shim — handled below), run the
-  # existing get.docker.com convenience script. The Debian/Ubuntu path is
-  # therefore byte-for-byte the same code as before; only the entry point
-  # into this function has changed.
+  # On any host where the native path was not taken (debian, or fedora-family
+  # IDs like centos that get.docker.com accepts), run the existing
+  # get.docker.com convenience script. The Debian/Ubuntu path is therefore
+  # byte-for-byte the same code as before; only the entry point into this
+  # function has changed.
   if [[ "${native_tried}" == "yes" ]]; then
     # A native install was attempted on this run. If docker still doesn't
     # resolve to a real Engine, exit with a clear message (the failure was

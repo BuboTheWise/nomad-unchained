@@ -182,6 +182,14 @@ check "B  almalinux -> dnf native, no get.docker.com" '[[ "$log" == *"dnf config
 run rhel ol absent no yes no
 check "C  oracle -> dnf native" '[[ "$log" == *"dnf config-manager --add-repo"* && "$out" == *"installation completed"* ]]'
 
+# I: Rocky Linux, docker absent -> dnf native (AC-1 newly routes rocky to dnf)
+run rhel rocky absent no yes no
+check "I  rocky -> dnf native (newly routed), no get.docker.com" '[[ "$log" == *"dnf config-manager --add-repo"* && "$log" != *"get-docker.sh"* && "$log" != *pacman* && "$out" == *"installation completed"* ]]'
+
+# J: RHEL, docker absent -> dnf native (AC-1 routes rhel to dnf)
+run rhel rhel absent no yes no
+check "J  rhel -> dnf native (AC-1), no get.docker.com" '[[ "$log" == *"dnf config-manager --add-repo"* && "$log" != *"get-docker.sh"* && "$out" == *"installation completed"* ]]'
+
 # D: Fedora, docker absent -> get.docker.com (default preserved)
 run rhel fedora absent no yes no
 check "D  fedora -> get.docker.com path" '[[ "$log" == *"get-docker.sh"* && "$log" != *pacman* && "$log" != *"dnf config-manager"* && "$out" == *"installation completed"* ]]'
