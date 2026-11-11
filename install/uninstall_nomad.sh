@@ -42,8 +42,19 @@ header_red() {
   echo -e "${RED}#########################################################################${RESET}\\n"
 }
 
+# Privilege prefix: empty when running as root (EUID==0), "sudo" otherwise.
+# Keeps the scripts working on base systems without sudo (Arch base, Debian
+# with a root password). When root, ${SUDO} expands to nothing so
+# `${SUDO} cmd` runs the command directly; otherwise it adds sudo.
+SUDO=""
+if [[ "${EUID}" -ne 0 ]]; then
+  SUDO="sudo"
+fi
+
 check_has_sudo() {
-  if sudo -n true 2>/dev/null; then
+  if [[ "${EUID}" -eq 0 ]]; then
+    echo -e "${GREEN}#${RESET} Running as root; sudo not required.\\n"
+  elif ${SUDO} -n true 2>/dev/null; then
     echo -e "${GREEN}#${RESET} User has sudo permissions.\\n"
   else
     echo "User does not have sudo permissions"
