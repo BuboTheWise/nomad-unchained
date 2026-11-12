@@ -89,8 +89,19 @@ NOMAD_ART
   echo -e "${GREEN}#########################################################################${RESET}\n"
 }
 
+# Privilege prefix: empty when running as root (EUID==0), "sudo" otherwise.
+# Keeps the scripts working on base systems without sudo (Arch base, Debian
+# with a root password). When root, ${SUDO} expands to nothing so
+# `${SUDO} cmd` runs the command directly; otherwise it adds sudo.
+SUDO=""
+if [[ "${EUID}" -ne 0 ]]; then
+  SUDO="sudo"
+fi
+
 check_has_sudo() {
-  if sudo -n true 2>/dev/null; then
+  if [[ "${EUID}" -eq 0 ]]; then
+    echo -e "${GREEN}#${RESET} Running as root; sudo not required.\\n"
+  elif ${SUDO} -n true 2>/dev/null; then
     echo -e "${GREEN}#${RESET} User has sudo permissions.\\n"
   else
     echo "User does not have sudo permissions"
@@ -170,14 +181,14 @@ pkg_install() {
 
   case "${PKG_FAMILY}" in
     debian)
-      sudo apt-get update
-      sudo apt-get install -y "${pkgs[@]}"
+      ${SUDO} apt-get update
+      ${SUDO} apt-get install -y "${pkgs[@]}"
       ;;
     rhel)
-      sudo dnf install -y "${pkgs[@]}"
+      ${SUDO} dnf install -y "${pkgs[@]}"
       ;;
     arch)
-      sudo pacman -S --noconfirm --needed "${pkgs[@]}"
+      ${SUDO} pacman -S --noconfirm --needed "${pkgs[@]}"
       ;;
     *)
       echo -e "${RED}#${RESET} No supported package manager found (expected apt, dnf, or pacman). Please install: ${*}\\n"
@@ -350,7 +361,7 @@ ensure_docker_installed() {
     curl -fsSL https://get.docker.com -o get-docker.sh
 
     # Run the Docker installation script
-    sudo sh get-docker.sh
+    ${SUDO} sh get-docker.sh
 
     # Check if Docker was installed successfully
     if ! command -v docker &> /dev/null; then
@@ -365,7 +376,7 @@ ensure_docker_installed() {
     # Check if Docker service is running
     if ! systemctl is-active --quiet docker; then
       echo -e "${YELLOW}#${RESET} Docker is installed but not running. Attempting to start Docker...\\n"
-      sudo systemctl start docker
+      ${SUDO} systemctl start docker
       if ! systemctl is-active --quiet docker; then
         echo -e "${RED}#${RESET} Failed to start Docker. Please check the Docker service status and try again."
         exit 1
@@ -408,7 +419,7 @@ install_nvidia_toolkit_for_family() {
       # Import the NVIDIA GPG key into the trustable keyring.
       local keyring_path="/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
       if ! curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null \
-          | sudo gpg --batch --yes --dearmor -o "${keyring_path}" 2>/dev/null; then
+          | ${SUDO} gpg --batch --yes --dearmor -o "${keyring_path}" 2>/dev/null; then
         echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit GPG key.\\n"
         echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
         return 0
@@ -417,17 +428,17 @@ install_nvidia_toolkit_for_family() {
       # Register the stable deb repository against that keyring.
       if ! curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null \
           | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-          | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null 2>&1; then
+          | ${SUDO} tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null 2>&1; then
         echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit apt repository.\\n"
         echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
         return 0
       fi
 
-      if ! sudo apt-get update 2>/dev/null; then
+      if ! ${SUDO} apt-get update 2>/dev/null; then
         echo -e "${YELLOW}#${RESET} Warning: Failed to refresh the apt package list.\\n"
       fi
 
-      if ! sudo apt-get install -y nvidia-container-toolkit 2>/dev/null; then
+      if ! ${SUDO} apt-get install -y nvidia-container-toolkit 2>/dev/null; then
         echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit.\\n"
         echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
         return 0
@@ -440,7 +451,7 @@ install_nvidia_toolkit_for_family() {
       local repo_file="/etc/yum.repos.d/nvidia-container-toolkit.repo"
       if [[ ! -f "${repo_file}" ]]; then
         if ! curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo 2>/dev/null \
-            | sudo tee "${repo_file}" > /dev/null 2>&1; then
+            | ${SUDO} tee "${repo_file}" > /dev/null 2>&1; then
           echo -e "${YELLOW}#${RESET} Warning: Failed to add NVIDIA container toolkit rpm repository.\\n"
           echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
           return 0
@@ -449,7 +460,7 @@ install_nvidia_toolkit_for_family() {
 
       # gpgcheck is disabled in the official NVIDIA .repo file (gpgkey points
       # at NVIDIA's key), so a separate key import is not required here.
-      if ! sudo dnf install -y nvidia-container-toolkit 2>/dev/null; then
+      if ! ${SUDO} dnf install -y nvidia-container-toolkit 2>/dev/null; then
         echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit.\\n"
         echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
         return 0
@@ -459,7 +470,7 @@ install_nvidia_toolkit_for_family() {
     arch)
       echo -e "${YELLOW}#${RESET} (arch) Installing NVIDIA container toolkit from official repositories...\\n"
 
-      if ! sudo pacman -S --noconfirm --needed nvidia-container-toolkit 2>/dev/null; then
+      if ! ${SUDO} pacman -S --noconfirm --needed nvidia-container-toolkit 2>/dev/null; then
         echo -e "${YELLOW}#${RESET} Warning: Failed to install NVIDIA container toolkit.\\n"
         echo -e "${YELLOW}#${RESET} GPU support for containers will be unavailable; the install will continue.\\n"
         return 0
@@ -529,7 +540,7 @@ setup_nvidia_container_toolkit() {
   # Configure Docker to use NVIDIA runtime
   echo -e "${YELLOW}#${RESET} Configuring Docker to use NVIDIA runtime...\\n"
   
-  if ! sudo nvidia-ctk runtime configure --runtime=docker 2>/dev/null; then
+  if ! ${SUDO} nvidia-ctk runtime configure --runtime=docker 2>/dev/null; then
     echo -e "${YELLOW}#${RESET} nvidia-ctk configure failed, attempting manual configuration...\\n"
     
     # Fallback: Manually configure daemon.json
@@ -538,19 +549,19 @@ setup_nvidia_container_toolkit() {
     
     if [[ -f "$daemon_json" ]]; then
       # Backup existing config (best effort)
-      sudo cp "$daemon_json" "${daemon_json}.backup" 2>/dev/null || true
+      ${SUDO} cp "$daemon_json" "${daemon_json}.backup" 2>/dev/null || true
       
       # Check if nvidia runtime already exists
       if ! grep -q '"nvidia"' "$daemon_json" 2>/dev/null; then
         # Add nvidia runtime to existing config using jq if available
         if command -v jq &> /dev/null; then
-          if sudo jq '. + {"runtimes": {"nvidia": {"path": "nvidia-container-runtime", "runtimeArgs": []}}}' "$daemon_json" > /tmp/daemon.json.tmp 2>/dev/null; then
-            if sudo mv /tmp/daemon.json.tmp "$daemon_json" 2>/dev/null; then
+          if ${SUDO} jq '. + {"runtimes": {"nvidia": {"path": "nvidia-container-runtime", "runtimeArgs": []}}}' "$daemon_json" > /tmp/daemon.json.tmp 2>/dev/null; then
+            if ${SUDO} mv /tmp/daemon.json.tmp "$daemon_json" 2>/dev/null; then
               config_success=true
             fi
           fi
           # Clean up temp file if move failed
-          sudo rm -f /tmp/daemon.json.tmp 2>/dev/null || true
+          ${SUDO} rm -f /tmp/daemon.json.tmp 2>/dev/null || true
         else
           echo -e "${YELLOW}#${RESET} jq not available, skipping manual daemon.json configuration...\\n"
         fi
@@ -559,7 +570,7 @@ setup_nvidia_container_toolkit() {
       fi
     else
       # Create new daemon.json with nvidia runtime (best effort)
-      if echo '{"runtimes":{"nvidia":{"path":"nvidia-container-runtime","runtimeArgs":[]}}}' | sudo tee "$daemon_json" > /dev/null 2>&1; then
+      if echo '{"runtimes":{"nvidia":{"path":"nvidia-container-runtime","runtimeArgs":[]}}}' | ${SUDO} tee "$daemon_json" > /dev/null 2>&1; then
         config_success=true
       fi
     fi
@@ -571,7 +582,7 @@ setup_nvidia_container_toolkit() {
   
   # Restart Docker service
   echo -e "${YELLOW}#${RESET} Restarting Docker service...\\n"
-  if ! sudo systemctl restart docker 2>/dev/null; then
+  if ! ${SUDO} systemctl restart docker 2>/dev/null; then
     echo -e "${YELLOW}#${RESET} Warning: Failed to restart Docker service. You may need to restart it manually.\\n"
     return 0
   fi
@@ -630,8 +641,8 @@ create_nomad_directory(){
   # Ensure the main installation directory exists
   if [[ ! -d "$NOMAD_DIR" ]]; then
     echo -e "${YELLOW}#${RESET} Creating directory for Project NOMAD at $NOMAD_DIR...\\n"
-    sudo mkdir -p "$NOMAD_DIR"
-    sudo chown "$(whoami):$(whoami)" "$NOMAD_DIR"
+    ${SUDO} mkdir -p "$NOMAD_DIR"
+    ${SUDO} chown "$(whoami):$(whoami)" "$NOMAD_DIR"
 
     echo -e "${GREEN}#${RESET} Directory created successfully.\\n"
   else
@@ -639,10 +650,10 @@ create_nomad_directory(){
   fi
 
   # Also ensure the directory has a /storage/logs/ subdirectory
-  sudo mkdir -p "${NOMAD_DIR}/storage/logs"
+  ${SUDO} mkdir -p "${NOMAD_DIR}/storage/logs"
 
   # Create a admin.log file in the logs directory
-  sudo touch "${NOMAD_DIR}/storage/logs/admin.log"
+  ${SUDO} touch "${NOMAD_DIR}/storage/logs/admin.log"
 }
 
 download_management_compose_file() {
@@ -711,7 +722,7 @@ download_management_compose_file() {
   elif [[ -n "${NOMAD_RESET_DB:-}" ]]; then
     if [[ -d "${NOMAD_DIR}/mysql" ]]; then
       echo -e "${YELLOW}#${RESET} NOMAD_RESET_DB set — removing existing MySQL data directory for a fresh init...\\n"
-      sudo rm -rf "${NOMAD_DIR}/mysql"
+      ${SUDO} rm -rf "${NOMAD_DIR}/mysql"
     fi
   elif [[ "${mysql_populated}" -eq 1 && -f "${creds_file}" ]]; then
     reuse_existing=1
@@ -721,7 +732,7 @@ download_management_compose_file() {
     # interrupted attempt. We don't know its creds, so re-init fresh (the
     # original intent of the guard) rather than ship a broken "Access denied".
     echo -e "${YELLOW}#${RESET} Found a MySQL data directory without a credential record — removing it for a clean fresh init...\\n"
-    sudo rm -rf "${NOMAD_DIR}/mysql"
+    ${SUDO} rm -rf "${NOMAD_DIR}/mysql"
   else
     echo -e "${YELLOW}#${RESET} No existing MySQL data directory — will initialize fresh with the new credentials.\\n"
   fi
@@ -792,7 +803,7 @@ download_helper_scripts() {
 
 start_management_containers() {
   echo -e "${YELLOW}#${RESET} Starting management containers using docker compose...\\n"
-  if ! sudo docker compose -p project-nomad -f "${NOMAD_DIR}/compose.yml" up -d; then
+  if ! ${SUDO} docker compose -p project-nomad -f "${NOMAD_DIR}/compose.yml" up -d; then
     echo -e "${RED}#${RESET} Failed to start management containers. Please check the logs and try again."
     exit 1
   fi
@@ -889,11 +900,11 @@ verify_gpu_setup() {
   # only reliable way for the admin to know an AMD GPU is present at install time.
   local gpu_marker_path="${NOMAD_DIR}/storage/.nomad-gpu-type"
   if command -v nvidia-smi &> /dev/null; then
-    echo 'nvidia' | sudo tee "${gpu_marker_path}" > /dev/null 2>&1 || true
+    echo 'nvidia' | ${SUDO} tee "${gpu_marker_path}" > /dev/null 2>&1 || true
   elif [[ "${has_amd_gpu}" == 'true' ]]; then
-    echo 'amd' | sudo tee "${gpu_marker_path}" > /dev/null 2>&1 || true
+    echo 'amd' | ${SUDO} tee "${gpu_marker_path}" > /dev/null 2>&1 || true
   else
-    sudo rm -f "${gpu_marker_path}" 2>/dev/null || true
+    ${SUDO} rm -f "${gpu_marker_path}" 2>/dev/null || true
   fi
 
   # Companion marker used by the admin to pick the right HSA_OVERRIDE_GFX_VERSION for
@@ -901,9 +912,9 @@ verify_gpu_setup() {
   # to its built-in default. Always rewrite (or remove) on install to keep state fresh.
   local amd_gfx_marker_path="${NOMAD_DIR}/storage/.nomad-amd-gfx"
   if [[ -n "${amd_gfx_version}" ]]; then
-    echo "${amd_gfx_version}" | sudo tee "${amd_gfx_marker_path}" > /dev/null 2>&1 || true
+    echo "${amd_gfx_version}" | ${SUDO} tee "${amd_gfx_marker_path}" > /dev/null 2>&1 || true
   else
-    sudo rm -f "${amd_gfx_marker_path}" 2>/dev/null || true
+    ${SUDO} rm -f "${amd_gfx_marker_path}" 2>/dev/null || true
   fi
 
   echo -e "${YELLOW}===========================================${RESET}\\n"
