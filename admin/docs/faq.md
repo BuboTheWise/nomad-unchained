@@ -12,11 +12,11 @@ No — that's the whole point. Once your content is downloaded, everything works
 - Sync the latest versions of Wikipedia, maps, etc.
 
 ### What operating system does NOMAD need?
-Debian-based Linux. **Ubuntu 26.04 LTS is what we recommend and test on** for new installs.
+Linux with a supported package family — **Debian-based is what we recommend and test on** (Ubuntu 26.04 LTS for new installs), with RHEL-family and Arch-based distributions supported via the installer's package-manager detection.
 
-Ubuntu 24.04 LTS and Debian 12 are also supported, so there is no need to reinstall if you are already on one of those. Windows users can follow the [WSL2 guide](https://www.projectnomad.us/install/wsl2), which is community-supported.
+Ubuntu 24.04 LTS and Debian 12 are also fully supported, so there is no need to reinstall if you are already on one of those. Windows users can follow the [WSL2 guide](https://www.projectnomad.us/install/wsl2), which is community-supported.
 
-macOS and non-Debian distributions like Fedora or Arch are not officially supported. NOMAD does not need a desktop environment, so Ubuntu Server is a fine choice if you are comfortable at the terminal.
+macOS is not officially supported. Non-Debian Linux — Fedora, Rocky/Alma, and Arch — is community-supported: the installer auto-detects your family (apt, dnf, or pacman) and the [Quick Install blocks in this fork's README](https://github.com/BuboTheWise/nomad-unchained#quick-install) cover the exact steps. It works for many users, but we can't guarantee the same level of support as the Debian-based path. NOMAD does not need a desktop environment, so Ubuntu Server is a fine choice if you are comfortable at the terminal.
 
 For a full walkthrough including the Ubuntu install itself, see the [Installation Guide](https://www.projectnomad.us/install).
 
