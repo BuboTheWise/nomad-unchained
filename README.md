@@ -15,20 +15,44 @@
 Project NOMAD is a self-contained, offline-first knowledge and education server packed with critical tools, knowledge, and AI to keep you informed and empowered — anytime, anywhere.
 
 ## Installation & Quickstart
-Project NOMAD can be installed on any Debian-based operating system (we recommend Ubuntu 26.04 LTS; 24.04 LTS and Debian 12 are also supported). Installation is completely terminal-based, and all tools and resources are designed to be accessed through the browser, so there's no need for a desktop environment if you'd rather setup NOMAD as a "server" and access it through other clients.
+Project NOMAD can be installed on Debian-based operating systems (we recommend Ubuntu 26.04 LTS; 24.04 LTS and Debian 12 are also supported) as well as on RHEL-family and Arch-based distributions via the community install paths below. Installation is completely terminal-based, and all tools and resources are designed to be accessed through the browser, so there's no need for a desktop environment if you'd rather setup NOMAD as a "server" and access it through other clients.
 
 **Before you start:** NOMAD itself needs about **5 GB of disk and under 1 GB of RAM**. The offline content you add afterwards is what actually fills a drive, and the AI Assistant is what drives the memory requirement up. See [Device Requirements](#device-requirements) for both, and the [FAQ](https://www.projectnomad.us/docs/faq) for individual content sizes.
 
 *Note: sudo/root privileges are required to run the install script*
 
-### Quick Install (Debian-based OS Only)
+### Quick Install
+
+The installer detects your distribution's package family (Debian, RHEL, or Arch) and routes the dependency, Docker, and GPU setup through the correct package manager, so the same install script works across all three. Pick the block that matches your system:
+
+**Debian / Ubuntu (apt)**
 ```bash
 sudo apt-get update && \
 sudo apt-get install -y curl && \
-curl -fsSL https://raw.githubusercontent.com/Crosstalk-Solutions/project-nomad/refs/heads/main/install/install_nomad.sh \
+curl -fsSL https://raw.githubusercontent.com/BuboTheWise/nomad-unchained/refs/heads/main/install/install_nomad.sh \
   -o install_nomad.sh && \
-sudo bash install_nomad.sh
+sudo NOMAD_SOURCE_REPO=BuboTheWise/nomad-unchained NOMAD_SOURCE_REF=main bash install_nomad.sh
 ```
+
+**Fedora / Rocky / Alma (dnf)**
+```bash
+sudo dnf install -y curl && \
+curl -fsSL https://raw.githubusercontent.com/BuboTheWise/nomad-unchained/refs/heads/main/install/install_nomad.sh \
+  -o install_nomad.sh && \
+sudo NOMAD_SOURCE_REPO=BuboTheWise/nomad-unchained NOMAD_SOURCE_REF=main bash install_nomad.sh
+```
+
+**Arch / Manjaro (pacman)**
+```bash
+sudo pacman -S --noconfirm --needed curl && \
+curl -fsSL https://raw.githubusercontent.com/BuboTheWise/nomad-unchained/refs/heads/main/install/install_nomad.sh \
+  -o install_nomad.sh && \
+sudo NOMAD_SOURCE_REPO=BuboTheWise/nomad-unchained NOMAD_SOURCE_REF=main bash install_nomad.sh
+```
+
+> **Why `NOMAD_SOURCE_REPO` / `NOMAD_SOURCE_REF`?** Each block needs only `curl` to be available — the leading line installs it via your family's package manager. Setting `NOMAD_SOURCE_REPO`/`NOMAD_SOURCE_REF` points the installer at this fork for the helper scripts it fetches during setup, so the whole install resolves against one source. To install upstream instead, drop those two variables (or set `NOMAD_SOURCE_REPO=Crosstalk-Solutions/project-nomad`).
+>
+> **Tested distributions:** Ubuntu 26.04 LTS, Ubuntu 24.04 LTS, Debian 12 (Bookworm), Fedora, Rocky/Alma Linux, and Arch.
 
 Project NOMAD is now installed on your device! Open a browser and navigate to `http://localhost:8080` (or `http://DEVICE_IP:8080`) to start exploring!
 
@@ -100,7 +124,7 @@ At its core, however, NOMAD is still very lightweight. For a barebones installat
 - Processor: 2 GHz dual-core processor or better
 - RAM: 4GB system memory (the whole stack without AI runs in under 1 GB)
 - Storage: At least 5 GB free disk space (plan for 10 GB to install comfortably)
-- OS: Debian-based (Ubuntu 26.04 LTS recommended)
+- OS: Linux with a supported package family — Debian-based (Ubuntu 26.04 LTS recommended), RHEL-family (Fedora, Rocky/Alma), or Arch-based. See [Quick Install](#quick-install)
 - Stable internet connection (required during install only)
 
 Adding the AI Assistant brings the install to roughly **25 GB**, because Ollama and a general-purpose model are both large, and a model needs about its download size in memory while it answers. That memory comes from VRAM if you have a discrete GPU and from system RAM if you do not, which is the single biggest reason the figures below are so much higher.
@@ -112,7 +136,7 @@ To run LLMs and other included AI tools:
 - RAM: 32 GB system memory
 - Graphics: NVIDIA RTX 3060 or AMD equivalent or better (more VRAM = run larger models)
 - Storage: At least 250 GB free disk space (preferably on SSD)
-- OS: Debian-based (Ubuntu 26.04 LTS recommended)
+- OS: Linux with a supported package family — Debian-based (Ubuntu 26.04 LTS recommended), RHEL-family (Fedora, Rocky/Alma), or Arch-based. See [Quick Install](#quick-install)
 - Stable internet connection (required during install only)
 
 **For detailed build recommendations at three price points ($150–$1,000+), see the [Hardware Guide](https://www.projectnomad.us/hardware).**

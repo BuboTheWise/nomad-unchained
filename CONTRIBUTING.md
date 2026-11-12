@@ -53,7 +53,7 @@ When opening an issue:
 
 ### Prerequisites
 
-- A Debian-based OS (Ubuntu 26.04 LTS recommended)
+- A Linux host with a supported package family — Debian-based (Ubuntu 26.04 LTS recommended) is the best-supported dev target, with RHEL-family (Fedora, Rocky/Alma) and Arch-based distributions also usable via the installer's family detection
 - `sudo`/root privileges
 - Docker installed and running
 - A stable internet connection (required for dependency downloads)

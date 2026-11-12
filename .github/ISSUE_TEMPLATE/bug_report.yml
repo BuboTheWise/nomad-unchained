@@ -95,9 +95,25 @@ body:
         - Debian 12 (Bookworm)
         - Debian 11 (Bullseye)
         - Other Debian-based
-        - Other (not yet officially supported)
+        - Fedora
+        - Rocky / AlmaLinux
+        - Arch / Manjaro
+        - Other (community-supported)
     validations:
       required: true
+
+  - type: dropdown
+    id: os-family
+    attributes:
+      label: OS Family (package manager)
+      description: Which package-manager family is your system? This helps us route the issue to the correct install path (apt, dnf, or pacman).
+      options:
+        - Debian-based (apt)
+        - RHEL-family (dnf) — Fedora, Rocky, Alma
+        - Arch-based (pacman)
+        - macOS / other
+    validations:
+      required: false
 
   - type: input
     id: docker-version
@@ -190,5 +206,5 @@ body:
           required: true
         - label: I have redacted any personal or sensitive information from logs and screenshots
           required: true
-        - label: This issue is NOT related to running NOMAD on an unsupported/non-Debian-based OS
+        - label: I have noted my OS and OS family above (community-supported distros welcome — no need to feel your report won't be taken seriously)
           required: false

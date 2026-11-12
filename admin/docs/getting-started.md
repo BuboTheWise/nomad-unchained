@@ -10,19 +10,19 @@ If you already have NOMAD running, you can skip this section. It is here for whe
 
 ### Operating System
 
-NOMAD runs on Debian-based Linux.
+NOMAD runs on Linux with a supported package family — Debian-based first, with RHEL- and Arch-based distributions reachable via the installer's package-manager detection.
 
 | Support level | Operating system |
 |---|---|
 | **Recommended** | Ubuntu 26.04 LTS |
 | **Also supported** | Ubuntu 24.04 LTS, Debian 12 |
-| **Community-supported** | Windows via WSL2, other Debian derivatives |
+| **Community-supported** | Windows via WSL2, other Debian derivatives, RHEL-family (Fedora, Rocky/Alma), Arch-based |
 
 Ubuntu 26.04 LTS is the version we test on and the one we recommend for new installs. If you are already running 24.04 LTS or Debian 12, there is no need to reinstall, both are still supported.
 
 Ubuntu Desktop is the friendlier choice if you are coming from Windows or macOS. Ubuntu Server works just as well if you are comfortable at the terminal, and NOMAD does not need a desktop environment either way since everything is accessed through a browser.
 
-macOS and non-Debian distributions like Fedora or Arch are not officially supported.
+macOS is not officially supported. Non-Debian Linux — Fedora, Rocky/Alma, and Arch — is community-supported: the installer auto-detects your package family (apt, dnf, or pacman), and the [Quick Install blocks in this fork's README](https://github.com/BuboTheWise/nomad-unchained#quick-install) walk through the exact steps for each.
 
 ### Hardware
 
