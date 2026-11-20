@@ -149,6 +149,27 @@ Note that if you use Ollama on a different host, you must start the server with 
 Ollama is the preferred way to use the AI assistant, as it has features such as model download that OpenAI API does not support. So when using LM Studio, for example, you will have to use LM Studio to download models.
 You are responsible for the setup of Ollama/OpenAI server on the other host.
 
+#### GPU Backend Configuration
+
+By default, NOMAD auto-detects your GPU and selects the best backend (ROCm for AMD, CUDA for NVIDIA). For GPUs that ROCm does not support natively — such as Intel Arc or unsupported AMD parts like the BC-250 (gfx1013) — you can opt into the Vulkan backend:
+
+1. Open the Command Center dashboard → **AI Assistant** → **Settings**.
+2. Set **GPU Backend** to `vulkan` (config key: `ai.gpuBackend`).
+3. Save and reinstall/restart the AI Assistant container.
+
+With Vulkan enabled, NOMAD uses the standard `ollama/ollama` image (not the ROCm variant) and passes `/dev/dri` device nodes into the container along with `OLLAMA_VULKAN=1`.
+
+**Available values for `ai.gpuBackend`:**
+
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Auto-detect NVIDIA → ROCm image; AMD → ROCm image; no GPU → CPU-only. |
+| `rocm` | Force the ROCm image regardless of detection (for manual gfx override scenarios). |
+| `vulkan` | Use the standard Ollama image with Vulkan via `/dev/dri` passthrough and `OLLAMA_VULKAN=1`. |
+| `cuda` | Force the CUDA image for NVIDIA GPUs. |
+
+**Troubleshooting:** The installer prints a GPU detection summary during setup. If your card is AMD-based but not on ROCm's official support list, you will see a note like *"GPU detected but ROCm version unsupported. Set ai.gpuBackend=vulkan in the dashboard to enable Vulkan acceleration."*
+
 ## Frequently Asked Questions (FAQ)
 For answers to common questions about Project NOMAD, please see our [FAQ](FAQ.md) page.
 
